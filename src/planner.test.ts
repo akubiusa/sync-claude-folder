@@ -52,6 +52,109 @@ describe('planStage', () => {
     }
   }
 
+  test.each([true, false])(
+    'a missing source aborts planning when mirror is %s',
+    async (mirror) => {
+      await fs.rm(sourceDir, { recursive: true })
+      await writeFile(path.join(destDir, 'keep.txt'), 'keep me')
+
+      await expect(
+        planStage(buildStage({ mirror, managed: ['**'] }))
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await fs.readFile(path.join(destDir, 'keep.txt'), 'utf8')).toBe(
+        'keep me'
+      )
+    }
+  )
+
+  test('a non-directory source aborts planning', async () => {
+    await fs.rm(sourceDir, { recursive: true })
+    await fs.writeFile(sourceDir, 'not a directory')
+
+    await expect(planStage(buildStage())).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+  })
+
+  test('a missing destination still permits creating source files', async () => {
+    await fs.rm(destDir, { recursive: true })
+    await writeFile(path.join(sourceDir, 'hooks', 'new.sh'), 'new')
+
+    const plan = await planStage(buildStage())
+
+    expect(
+      plan.items.map(({ relPath, action }) => ({ relPath, action }))
+    ).toEqual([{ relPath: 'hooks/new.sh', action: 'create' }])
+  })
+
+  test.each([
+    ['file', 'skills/token.txt'],
+    ['symlink', 'skills/token.txt'],
+    ['file', 'skills/**/token.*'],
+    ['symlink', '**/token.*'],
+  ])(
+    'a %s cannot replace a directory containing a protected entry matched by %s',
+    async (type, pattern) => {
+      await writeFile(path.join(destDir, 'skills', 'token.txt'), 'secret')
+      if (type === 'symlink') {
+        await fs.symlink('replacement-target', path.join(sourceDir, 'skills'))
+      } else {
+        await writeFile(path.join(sourceDir, 'skills'), 'replacement')
+      }
+
+      await expect(
+        planStage(
+          buildStage({
+            chezmoiNaming: false,
+            managed: ['skills'],
+            protected: [pattern],
+          })
+        )
+      ).rejects.toThrow(
+        'Cannot replace directory "skills": protected entry "skills/token.txt" would be removed'
+      )
+    }
+  )
+
+  test('a protected empty directory blocks replacement of its ancestor', async () => {
+    await fs.mkdir(path.join(destDir, 'skills', 'private'), { recursive: true })
+    await writeFile(path.join(sourceDir, 'skills'), 'replacement')
+
+    await expect(
+      planStage(
+        buildStage({ managed: ['skills'], protected: ['skills/private'] })
+      )
+    ).rejects.toThrow('protected entry "skills/private" would be removed')
+  })
+
+  test('a protected dangling symlink blocks replacement of its ancestor', async () => {
+    await fs.mkdir(path.join(destDir, 'skills'))
+    await fs.symlink(
+      'missing-target',
+      path.join(destDir, 'skills', 'token.txt')
+    )
+    await writeFile(path.join(sourceDir, 'skills'), 'replacement')
+
+    await expect(
+      planStage(
+        buildStage({ managed: ['skills'], protected: ['skills/token.txt'] })
+      )
+    ).rejects.toThrow('protected entry "skills/token.txt" would be removed')
+  })
+
+  test('unprotected directories can still be replaced', async () => {
+    await writeFile(path.join(destDir, 'skills', 'old.txt'), 'old')
+    await writeFile(path.join(sourceDir, 'skills'), 'replacement')
+
+    const plan = await planStage(
+      buildStage({ managed: ['skills'], protected: ['skills/token.txt'] })
+    )
+
+    expect(
+      plan.items.map(({ relPath, action }) => ({ relPath, action }))
+    ).toEqual([{ relPath: 'skills', action: 'update' }])
+  })
+
   test('a new file is planned as create', async () => {
     await writeFile(
       path.join(sourceDir, 'hooks', 'executable_foo.sh'),

@@ -64,6 +64,55 @@ describe('runSync backups', () => {
     await fs.rm(tmpDir, { recursive: true, force: true })
   })
 
+  test.each([
+    ['missing source', false],
+    ['missing source', true],
+    ['protected descendant', false],
+    ['protected descendant', true],
+  ])('%s aborts without mutations with apply=%s', async (scenario, apply) => {
+    const source = path.join(tmpDir, 'source')
+    const dest = path.join(tmpDir, 'dest')
+    const backupRoot = path.join(tmpDir, 'backup')
+    const tokenPath = path.join(dest, 'skills', 'token.txt')
+    await fs.mkdir(path.dirname(tokenPath), { recursive: true })
+    await fs.writeFile(tokenPath, 'keep secret')
+    if (scenario === 'protected descendant') {
+      await fs.mkdir(source)
+      await fs.writeFile(path.join(source, 'skills'), 'replacement')
+    }
+    const configPath = path.join(tmpDir, 'config.json')
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        stages: [
+          {
+            name: 'test-stage',
+            source,
+            dest,
+            chezmoiNaming: false,
+            mirror: true,
+            managed: ['**'],
+            ignore: [],
+            protected:
+              scenario === 'protected descendant' ? ['skills/token.txt'] : [],
+            transforms: [],
+          },
+        ],
+      })
+    )
+
+    await expect(
+      runSync(configPath, undefined, apply, backupRoot)
+    ).rejects.toThrow(
+      scenario === 'missing source' ? 'ENOENT' : 'protected entry'
+    )
+
+    expect(await fs.readFile(tokenPath, 'utf8')).toBe('keep secret')
+    const parentStat = await fs.lstat(path.dirname(tokenPath))
+    expect(parentStat.isDirectory()).toBe(true)
+    await expect(fs.lstat(backupRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   test('per-stage backups are kept under a single run ID when multiple stages update the same file', async () => {
     const source = path.join(tmpDir, 'source')
     await fs.mkdir(source)
