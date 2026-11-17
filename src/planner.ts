@@ -137,11 +137,15 @@ async function buildExpectedEntries(
  * Compares the existing dest entry with the expected entry and decides the action and reason.
  * @param destPath Absolute path on the dest side
  * @param expected Expected entry
+ * @param protectedPatterns Destination globs that must survive directory replacement
+ * @param targetRel Real-name path relative to dest
  * @returns Action and reason
  */
 async function decideAction(
   destPath: string,
-  expected: ExpectedEntry
+  expected: ExpectedEntry,
+  protectedPatterns: string[],
+  targetRel: string
 ): Promise<{ action: PlanAction; reason: string }> {
   const destStat = await fs.lstat(destPath).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -152,6 +156,18 @@ async function decideAction(
 
   if (!destStat) {
     return { action: 'create', reason: 'not present in dest' }
+  }
+
+  if (destStat.isDirectory() && protectedPatterns.length > 0) {
+    const descendants = await walkFiles(destPath, { includeDirectories: true })
+    const protectedPath = descendants
+      .map((relPath) => `${targetRel}/${relPath}`)
+      .find((relPath) => matchAnyGlob(protectedPatterns, relPath))
+    if (protectedPath !== undefined) {
+      throw new Error(
+        `Cannot replace directory "${targetRel}": protected entry "${protectedPath}" would be removed`
+      )
+    }
   }
 
   if (expected.type === 'symlink') {
@@ -199,7 +215,12 @@ export async function planStage(stage: StageConfig): Promise<StagePlan> {
     }
 
     const destPath = path.join(destDir, ...targetRel.split('/'))
-    const { action, reason } = await decideAction(destPath, entry)
+    const { action, reason } = await decideAction(
+      destPath,
+      entry,
+      stage.protected,
+      targetRel
+    )
 
     items.push({
       relPath: targetRel,
@@ -215,7 +236,7 @@ export async function planStage(stage: StageConfig): Promise<StagePlan> {
   }
 
   if (stage.mirror) {
-    const destFiles = await walkFiles(destDir)
+    const destFiles = await walkFiles(destDir, { allowMissingRoot: true })
     for (const relPath of destFiles) {
       // protected is always excluded from deletion (highest-priority guard)
       if (matchAnyGlob(stage.protected, relPath)) {

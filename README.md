@@ -43,12 +43,12 @@ Before writing or deleting, existing files are backed up to `~/.sync-claude-back
 Copy `config.example.json` to `config.json` and edit to match your environment. `config.json` is gitignored because it contains machine-specific paths.
 
 - `stages[].name`: stage identifier used by `--stage` and as the backup subdirectory. It must match `^[A-Za-z0-9_][A-Za-z0-9._-]*$` and be unique within the config
-- `stages[].source` / `dest`: source/destination directories (`~` expansion supported)
+- `stages[].source` / `dest`: source/destination directories (`~` expansion supported). The source must exist and be readable; missing source entries abort planning instead of being treated as an empty source. A missing destination is allowed.
 - `chezmoiNaming`: whether to convert source names from chezmoi naming to real names
 - `mirror`: whether to delete real-name files inside `managed` that no longer exist in source
 - `managed`: real-name globs to sync and mirror
 - `ignore`: globs to ignore on the source side (evaluated against pre-conversion source names)
-- `protected`: globs always excluded from create/update/delete on the dest side
+- `protected`: globs always excluded from create/update/delete on the dest side. Replacing a destination directory with a file or symlink aborts planning if any existing descendant matches a protected glob, including directories and symlinks.
 - `transforms`: `remove`/`set`/`merge` operations applied to JSON files
 
 See [`config.schema.json`](./config.schema.json) for the full schema.

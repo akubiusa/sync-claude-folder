@@ -24,12 +24,18 @@ export function toPosixPath(targetPath: string): string {
 
 /**
  * Recursively walks a directory and returns the relative paths (POSIX separators)
- * of files and symlinks. Directories themselves are not included.
- * Returns an empty array if the root does not exist.
+ * of files and symlinks, optionally including directories.
+ * Missing entries abort traversal unless a missing root is explicitly allowed.
  * @param root Directory to walk (absolute path)
+ * @param options Traversal options for optional destinations and directory protection
+ * @param options.allowMissingRoot Whether an absent root is treated as empty
+ * @param options.includeDirectories Whether directory paths are included in the result
  * @returns Paths relative to the root (POSIX separators)
  */
-export async function walkFiles(root: string): Promise<string[]> {
+export async function walkFiles(
+  root: string,
+  options: { allowMissingRoot?: boolean; includeDirectories?: boolean } = {}
+): Promise<string[]> {
   const result: string[] = []
 
   /** Recursively walks `dir`, appending to `result`. */
@@ -38,7 +44,11 @@ export async function walkFiles(root: string): Promise<string[]> {
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (
+        dir === root &&
+        options.allowMissingRoot &&
+        (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
         return
       }
       throw error
@@ -47,6 +57,9 @@ export async function walkFiles(root: string): Promise<string[]> {
     for (const entry of entries) {
       const absolutePath = path.join(dir, entry.name)
       if (entry.isDirectory()) {
+        if (options.includeDirectories) {
+          result.push(toPosixPath(path.relative(root, absolutePath)))
+        }
         await walk(absolutePath)
         continue
       }

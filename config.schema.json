@@ -31,13 +31,20 @@
           "minLength": 1,
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$"
         },
-        "source": { "type": "string" },
+        "source": {
+          "type": "string",
+          "description": "Source directory, which must exist and be readable. Missing source entries abort planning."
+        },
         "dest": { "type": "string" },
         "chezmoiNaming": { "type": "boolean" },
         "mirror": { "type": "boolean" },
         "managed": { "type": "array", "items": { "type": "string" } },
         "ignore": { "type": "array", "items": { "type": "string" } },
-        "protected": { "type": "array", "items": { "type": "string" } },
+        "protected": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Destination globs excluded from create/update/delete. Replacing a directory aborts planning if an existing descendant matches a protected glob."
+        },
         "transforms": {
           "type": "array",
           "items": { "$ref": "#/definitions/transform" }
